@@ -1,0 +1,6 @@
+Product ID,Product Name,Category,Quantity On Hand,Reorder Point,Unit Cost,Selling Price,Last Purchase Date
+P001,Coffee Beans,Beverages,120,30,3.5,5.99,2026-01-10
+P002,Green Tea,Beverages,80,20,2.0,3.99,2026-01-12
+P003,Chocolate Bar,Snacks,200,50,0.75,1.99,2026-01-05
+P004,Almond Milk,Beverages,50,15,1.2,2.49,2025-12-28
+P005,Trail Mix,Snacks,95,25,1.8,3.49,2026-01-20

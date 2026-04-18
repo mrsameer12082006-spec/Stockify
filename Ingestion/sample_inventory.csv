@@ -1,0 +1,22 @@
+Product ID,Product Name,Category,Quantity On Hand,Reorder Point,Unit Cost,Selling Price,Last Purchase Date
+ P001 ,Laptop , Electronics ,15 ,5 ,600 ,899 ,2025-12-20
+P002,Mouse,Accessories,50,20,15,25,2026/01/15
+P003 , Keyboard ,Accessories,thirty five,15,30,60,2026-01-10
+P004,Monitor,Electronics,10,3,200,350,11-30-2025
+P005,Desk Lamp,Furniture,25,10,45,75,2026-01-05
+P006,Office Chair,Furniture,,8,120,200,2026-01-12
+P007,Webcam,Electronics,  8  ,7,40,80,2026-01-02
+P008,USB Cable,Accessories,100,30,3,8,2026-01-18
+P009,Notebook,Furniture,40,,5,12,2026-01-01
+P010,Printer,Electronics,-5,4,150,250,2026-01-20
+P011,,Accessories,20,10,10,20,2026-01-22
+P012,Router,Electronics,15,5,abc,120,2026-01-25
+P013,Tablet,Electronics,12,5,300,500,not_a_date
+P002,Mouse,Accessories,50,20,15,25,2026/01/15
+P014,  Speaker  , Electronics ,18 ,5 , 80 ,150 ,2026-01-28
+P015,Headphones,Accessories,,5,25,60,
+P016,Lamp,Furniture,NaN,10,30,55,2026-02-01
+P017,Desk,Furniture,60,20,110,220,2026-01-15
+P018,Camera,Electronics, 25 , 10 , 400 ,700 ,2026-01-30
+P019,Mousepad,Accessories,  ,5,5,12,2026-01-05
+P020,Keyboard,Accessories,35,15,30,60,2026-01-10
