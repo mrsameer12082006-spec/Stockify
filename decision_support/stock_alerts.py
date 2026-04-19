@@ -1,6 +1,8 @@
 import pandas as pd
 import streamlit as st
 
+from utils.data_source_widget import render_data_source_status
+
 
 def generate_stock_alerts(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -86,6 +88,7 @@ def show_stock_alerts():
         '<div class="page-subtitle">Real-time inventory health alerts and actionable recommendations</div>',
         unsafe_allow_html=True,
     )
+    render_data_source_status(results)
     
     if stock_recommendations.empty:
         st.markdown("""

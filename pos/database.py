@@ -91,14 +91,28 @@ class Database:
             try:
                 sales_df = pd.read_csv(self.SALES_CSV)
                 for _, row in sales_df.iterrows():
+                    transaction_id = str(row.get("transaction_id", "") or "").strip()
+                    date_value = str(row.get("date", "") or "").strip()
+                    sku_value = str(row.get("sku", "") or "").strip()
+                    product_value = str(row.get("product", "") or "").strip()
+                    category_value = str(row.get("category", "") or "").strip()
+
+                    if not transaction_id:
+                        transaction_id = f"TXN-{int(datetime.now().timestamp())}"
+                    if not sku_value:
+                        sku_value = product_value
+
+                    quantity_value = pd.to_numeric(row.get("quantity", 0), errors="coerce")
+                    revenue_value = pd.to_numeric(row.get("revenue", 0.0), errors="coerce")
+
                     self._insert_sale_row({
-                        "transaction_id": str(row.get("transaction_id", "")).strip() or f"TXN-{int(datetime.now().timestamp())}",
-                        "date": str(row.get("date", "")).strip(),
-                        "sku": str(row.get("product", "")).strip(),
-                        "product": str(row.get("product", "")).strip(),
-                        "quantity": int(row.get("quantity", 0) or 0),
-                        "revenue": float(row.get("revenue", 0.0) or 0.0),
-                        "category": str(row.get("category", "")).strip(),
+                        "transaction_id": transaction_id,
+                        "date": date_value,
+                        "sku": sku_value,
+                        "product": product_value,
+                        "quantity": int(quantity_value) if pd.notna(quantity_value) else 0,
+                        "revenue": float(revenue_value) if pd.notna(revenue_value) else 0.0,
+                        "category": category_value,
                     })
             except Exception:
                 pass
@@ -175,6 +189,28 @@ class Database:
                 return
 
             new_stock = max(0, int(row["stock"] or 0) - quantity)
+            conn.execute(
+                "UPDATE inventory SET stock = ? WHERE UPPER(barcode) = ? OR UPPER(sku) = ?",
+                (new_stock, normalized, normalized),
+            )
+            conn.commit()
+
+        self._sync_inventory_csv()
+
+    def increment_stock(self, sku: str, quantity: int = 1) -> None:
+        if not sku or quantity <= 0:
+            return
+
+        normalized = self._normalize_code(sku)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT stock FROM inventory WHERE UPPER(barcode) = ? OR UPPER(sku) = ? LIMIT 1",
+                (normalized, normalized),
+            ).fetchone()
+            if row is None:
+                return
+
+            new_stock = int(row["stock"] or 0) + quantity
             conn.execute(
                 "UPDATE inventory SET stock = ? WHERE UPPER(barcode) = ? OR UPPER(sku) = ?",
                 (new_stock, normalized, normalized),

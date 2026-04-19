@@ -9,19 +9,22 @@ from .transaction import Transaction
 from .inventory_update import InventoryUpdater
 from .product_lookup import ProductLookup
 from .supplier_logic import SupplierLogic
-from .api import BarcodeAPI, start_api_server, get_api_server
+from .api import BarcodeAPI, start_api_server, get_api_server, get_api
 from utils.helpers import format_currency
 
 
-def _render_qr_code(url: str, size: int = 280) -> None:
+def _render_qr_code(size: int = 280) -> None:
     html = f"""
     <div id='qrcode'></div>
     <script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script>
     <script>
       const container = document.getElementById('qrcode');
       container.innerHTML = '';
-      new QRCode(container, {{
-        text: {json.dumps(url)},
+            const target = new URL(window.parent.location.href);
+            target.searchParams.set('mobile_scanner', '1');
+            target.searchParams.delete('scan_code');
+            new QRCode(container, {{
+                text: target.toString(),
         width: {size},
         height: {size},
         colorDark: '#000000',
@@ -55,7 +58,7 @@ def show_pos_page():
             supplier_logic = SupplierLogic()
             cart = st.session_state.pos_cart
             scanner = BarcodeScanner()
-            api = BarcodeAPI()
+            api = get_api()
             
             # Safely start API server
             try:
@@ -92,8 +95,20 @@ def show_pos_page():
                     if do_scan:
                         scan_result = api.scan_and_sell(barcode, quantity)
                         if scan_result:
-                            st.success(f"Scanned {quantity} x {product['name']} and updated inventory.")
-                            st.write(f"Updated stock: {scan_result['updated_stock']}")
+                            action = scan_result.get("action", "")
+                            if action == "inventory":
+                                st.success(
+                                    f"First scan: {quantity} x {product['name']} added to inventory. "
+                                    "Scan again to record sale."
+                                )
+                            elif action == "sale":
+                                st.success(f"Second scan: sale recorded for {quantity} x {product['name']}.")
+                            else:
+                                st.success(f"Scanned {quantity} x {product['name']}.")
+
+                            st.write(f"Updated stock: {scan_result.get('updated_stock')}")
+                            if scan_result.get("sale"):
+                                st.write(f"Revenue added: {format_currency(scan_result['sale'].get('revenue', 0))}")
                         else:
                             st.error("Unable to scan and update inventory. Check the barcode and quantity.")
                 else:
@@ -191,13 +206,12 @@ def show_pos_page():
         # Mobile scanner
         with st.expander("Mobile barcode scanner"):
             st.write("Scan this QR code with your phone to open a mobile scanner.")
-            mobile_scan_url = f"{api_url}/"
             try:
-                _render_qr_code(mobile_scan_url)
+                _render_qr_code()
             except Exception as qr_err:
                 st.info("QR code rendering unavailable")
-            st.write("Open this URL on your phone if QR scan doesn't work:")
-            st.code(mobile_scan_url, language="bash")
+            st.write("The QR opens this app in mobile scanner mode.")
+            st.code("Same app URL + ?mobile_scanner=1", language="bash")
 
     except Exception as e:
         st.error(f"POS page error: {str(e)}")

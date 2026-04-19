@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 
 from utils.helpers import format_currency
+from utils.data_source_widget import render_data_source_status
 
 
 def show_trends():
@@ -18,6 +19,7 @@ def show_trends():
         '<div class="page-subtitle">Track sales and inventory patterns over time</div>',
         unsafe_allow_html=True,
     )
+    render_data_source_status(results)
     
     # Get trend data from analytics results
     daily_trends = results.get("daily_trends", pd.DataFrame())

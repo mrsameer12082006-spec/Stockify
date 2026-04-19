@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 
 from utils.helpers import format_currency
+from utils.data_source_widget import render_data_source_status
 
 
 def show_visualizations():
@@ -18,6 +19,7 @@ def show_visualizations():
         '<div class="page-subtitle">Comprehensive charts and analytics visualizations</div>',
         unsafe_allow_html=True,
     )
+    render_data_source_status(results)
     
     # Get data from results
     daily_trends = results.get("daily_trends", pd.DataFrame())

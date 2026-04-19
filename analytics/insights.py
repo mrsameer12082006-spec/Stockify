@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 
 from utils.helpers import format_currency
+from utils.data_source_widget import render_data_source_status
 
 
 def show_insights():
@@ -18,6 +19,7 @@ def show_insights():
         '<div class="page-subtitle">AI-powered recommendations to optimize your inventory</div>',
         unsafe_allow_html=True,
     )
+    render_data_source_status(results)
     
     # Get recommendation data from analytics results
     stock_recommendations = results.get("stock_recommendations", pd.DataFrame())

@@ -7,6 +7,7 @@ if _project_root not in sys.path:
 
 import streamlit as st
 import pandas as pd
+import streamlit.components.v1 as components
 from frontend.products import show_products
 from analytics.trends import show_trends
 from frontend.layout import set_layout
@@ -27,6 +28,8 @@ if str(project_root) not in sys.path:
 
 from analytics.analytics_runner import run_analytics
 from pos.pos_page import show_pos_page
+from pos.api import get_api
+from datetime import datetime
 
 
 def build_demo_analytics_results(industry_focus: str = "Grocery Stores") -> dict:
@@ -175,15 +178,169 @@ def build_demo_analytics_results(industry_focus: str = "Grocery Stores") -> dict
         "stock_recommendations": stock_recommendations,
     }
 
+
+LIVE_DATA_FILES = [
+    project_root / "data" / "processed" / "clean_sales.csv",
+    project_root / "data" / "processed" / "clean_inventory.csv",
+    project_root / "data" / "processed" / "stockify.db",
+    project_root / "Ingestion" / "data" / "processed" / "sales_cleaned.csv",
+    project_root / "Ingestion" / "data" / "processed" / "inventory_cleaned.csv",
+    project_root / "ingestion" / "data" / "processed" / "sales_cleaned.csv",
+    project_root / "ingestion" / "data" / "processed" / "inventory_cleaned.csv",
+]
+
+LIVE_ANALYTICS_PAGES = {
+    "📊 Overview",
+    "📦 Products",
+    "📈 Trends",
+    "💡 Insights",
+    "🚨 Alerts",
+    "📉 Charts",
+}
+
+
+def _compute_data_signature() -> tuple:
+    signature = []
+    for file_path in LIVE_DATA_FILES:
+        try:
+            stat = file_path.stat()
+            signature.append((str(file_path), stat.st_mtime_ns, stat.st_size))
+        except FileNotFoundError:
+            signature.append((str(file_path), None, None))
+    return tuple(signature)
+
+
+def _refresh_analytics_results_if_needed(force: bool = False) -> bool:
+    current_signature = _compute_data_signature()
+    previous_signature = st.session_state.get("live_data_signature")
+    should_refresh = force or previous_signature is None or current_signature != previous_signature
+
+    if should_refresh:
+        st.session_state.analytics_results = run_analytics()
+        st.session_state.live_data_signature = current_signature
+        st.session_state.analytics_last_refresh = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    return should_refresh
+
+
+def _query_param(name: str) -> str:
+        try:
+                value = st.query_params.get(name, "")
+                if isinstance(value, list):
+                        return str(value[0]) if value else ""
+                return str(value)
+        except Exception:
+                return ""
+
+
+def _set_query_params(**params) -> None:
+        try:
+                st.query_params.clear()
+                for key, value in params.items():
+                        if value is not None and value != "":
+                                st.query_params[key] = str(value)
+        except Exception:
+                pass
+
+
+def _render_mobile_scanner_mode() -> None:
+        st.markdown("## 📱 Mobile Barcode Scanner", unsafe_allow_html=True)
+        st.caption("Use this page on your phone camera to scan barcodes directly into Stockify.")
+
+        scan_code = _query_param("scan_code").strip()
+        api = get_api()
+
+        if scan_code:
+                if st.session_state.get("mobile_last_processed_scan") != scan_code:
+                        result = api.scan_and_sell(scan_code, 1)
+                        st.session_state.mobile_last_processed_scan = scan_code
+                        st.session_state.mobile_last_scan_result = result
+                        st.session_state.analytics_results = run_analytics()
+                        st.session_state.live_data_signature = None
+                        st.rerun()
+
+                result = st.session_state.get("mobile_last_scan_result")
+                if result:
+                        action = result.get("action", "")
+                        product = result.get("product", {})
+                        st.success(result.get("message", "Scan processed."))
+                        st.write(f"**Item:** {product.get('name', scan_code)}")
+                        st.write(f"**Stock:** {result.get('updated_stock')}")
+                        if action == "sale" and result.get("sale"):
+                                st.write(f"**Revenue:** {result['sale'].get('revenue')}")
+                else:
+                        st.error("Scan could not be processed.")
+
+                if st.button("Scan another item", key="mobile_scan_again"):
+                        st.session_state.mobile_last_processed_scan = ""
+                        st.session_state.mobile_last_scan_result = None
+                        _set_query_params(mobile_scanner=1)
+                        st.rerun()
+
+                return
+
+        scanner_html = """
+        <div style='padding: 8px 0 18px 0;'>
+            <div id='reader' style='width: 100%; max-width: 520px; margin: 0 auto;'></div>
+            <div id='output' style='margin-top: 14px; padding: 12px; border-radius: 10px; background: #f6f8ff; color: #1f2937;'>Starting camera...</div>
+        </div>
+        <script src='https://unpkg.com/html5-qrcode@2.3.7/minified/html5-qrcode.min.js'></script>
+        <script>
+            const output = document.getElementById('output');
+            const scanner = new Html5Qrcode('reader');
+            let scanInFlight = false;
+            let lastScan = '';
+            let lastTs = 0;
+            const coolDown = 1200;
+
+            function navigateWithScan(text) {
+                const url = new URL(window.parent.location.href);
+                url.searchParams.set('mobile_scanner', '1');
+                url.searchParams.set('scan_code', text);
+                window.parent.location.href = url.toString();
+            }
+
+            Html5Qrcode.getCameras().then(cameras => {
+                if (!cameras || !cameras.length) {
+                    output.textContent = 'No camera found on this device.';
+                    return;
+                }
+                const cameraId = cameras[cameras.length - 1].id;
+                scanner.start(
+                    cameraId,
+                    { fps: 10, qrbox: 250 },
+                    text => {
+                        const now = Date.now();
+                        if (scanInFlight) return;
+                        if (text === lastScan && (now - lastTs) < coolDown) return;
+                        lastScan = text;
+                        lastTs = now;
+                        scanInFlight = true;
+                        output.textContent = 'Scanned ' + text + ' — opening Stockify...';
+                        scanner.stop().finally(() => navigateWithScan(text));
+                    },
+                    err => console.warn(err)
+                ).catch(err => {
+                    output.textContent = 'Unable to start camera: ' + err;
+                });
+            }).catch(err => {
+                output.textContent = 'Camera access denied or unsupported: ' + err;
+            });
+        </script>
+        """
+
+        components.html(scanner_html, height=520)
+
+
 # Always run analytics fresh to ensure decision_support data is included
 # This runs once per session (Streamlit caches session_state across reruns)
 if "analytics_results" not in st.session_state or "stock_recommendations" not in st.session_state.get("analytics_results", {}):
-    st.session_state.analytics_results = run_analytics()
+    _refresh_analytics_results_if_needed(force=True)
 # Also re-run if stock_recommendations is empty but inventory data exists
 elif st.session_state.analytics_results.get("inventory_df") is not None:
     recs = st.session_state.analytics_results.get("stock_recommendations")
     if recs is None or (hasattr(recs, "empty") and recs.empty):
-        st.session_state.analytics_results = run_analytics()
+        _refresh_analytics_results_if_needed(force=True)
 
 set_layout()
 
@@ -199,6 +356,12 @@ if "users" not in st.session_state:
     st.session_state.users = {"admin": "admin"}
 if "auth_mode" not in st.session_state:
     st.session_state.auth_mode = "signin"
+
+
+if _query_param("mobile_scanner") == "1":
+    set_layout()
+    _render_mobile_scanner_mode()
+    st.stop()
 
 
 # ---------------- LOGIN PAGE (Antigravity-style) ----------------
@@ -453,6 +616,18 @@ if not st.session_state.logged_in:
         show_landing_page()
 else:
     page = top_navigation()
+
+    # Keep analytics data in sync with POS scans / inventory writes.
+    refreshed = _refresh_analytics_results_if_needed(force=False)
+
+    live_updates_enabled = st.sidebar.toggle("🔄 Live updates", value=False, key="live_updates_enabled")
+    if live_updates_enabled and page in LIVE_ANALYTICS_PAGES:
+        st.sidebar.caption("Live updates enabled: data refreshes on each Streamlit rerun without hard page reload.")
+
+    if refreshed:
+        last_refresh = st.session_state.get("analytics_last_refresh")
+        if last_refresh:
+            st.sidebar.caption(f"Analytics refreshed: {last_refresh}")
 
     if page == "🏠 Home":
         show_home()

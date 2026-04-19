@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 
+from utils.data_source_widget import render_data_source_status
+
 def show_products():
     results = st.session_state.get("analytics_results", {})
 
@@ -9,6 +11,7 @@ def show_products():
         '<div class="page-subtitle">Demand classification and product performance breakdown</div>',
         unsafe_allow_html=True,
     )
+    render_data_source_status(results)
 
     product_demand = results.get("product_demand", pd.DataFrame())
 

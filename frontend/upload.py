@@ -3,6 +3,17 @@ from pathlib import Path
 import sys
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CANONICAL_DATA_DIR = PROJECT_ROOT / "data" / "processed"
+CANONICAL_INVENTORY_FILE = CANONICAL_DATA_DIR / "clean_inventory.csv"
+CANONICAL_SALES_FILE = CANONICAL_DATA_DIR / "clean_sales.csv"
+CANONICAL_DB_FILE = CANONICAL_DATA_DIR / "stockify.db"
+INGESTION_INVENTORY_FILE = PROJECT_ROOT / "Ingestion" / "data" / "processed" / "inventory_cleaned.csv"
+INGESTION_SALES_FILE = PROJECT_ROOT / "Ingestion" / "data" / "processed" / "sales_cleaned.csv"
+INGESTION_LOWER_INVENTORY_FILE = PROJECT_ROOT / "ingestion" / "data" / "processed" / "inventory_cleaned.csv"
+INGESTION_LOWER_SALES_FILE = PROJECT_ROOT / "ingestion" / "data" / "processed" / "sales_cleaned.csv"
+
+
 def _ensure_paths_in_sys():
     project_dir = Path(__file__).resolve().parent
     project_root = Path(__file__).resolve().parents[1]
@@ -48,6 +59,32 @@ def show_upload():
         icon="ℹ️"
     )
 
+    with st.expander("🧹 Reset all POS + ingestion data"):
+        st.caption("Use this to force all analytics pages back to zero state.")
+        if st.button("Reset data now", key="reset_all_data_btn", type="secondary"):
+            files_to_remove = [
+                CANONICAL_INVENTORY_FILE,
+                CANONICAL_SALES_FILE,
+                CANONICAL_DB_FILE,
+                INGESTION_INVENTORY_FILE,
+                INGESTION_SALES_FILE,
+                INGESTION_LOWER_INVENTORY_FILE,
+                INGESTION_LOWER_SALES_FILE,
+            ]
+            removed = 0
+            for target in files_to_remove:
+                try:
+                    if target.exists():
+                        target.unlink()
+                        removed += 1
+                except Exception:
+                    pass
+
+            if run_analytics:
+                st.session_state.analytics_results = run_analytics()
+            st.session_state.live_data_signature = None
+            st.success(f"✅ Reset complete. Removed {removed} data file(s). Analytics now reflects zero state until new POS/upload data arrives.")
+
     # ===== INVENTORY UPLOAD =====
     st.markdown('<div class="section-header">📦 Inventory File</div>', unsafe_allow_html=True)
 
@@ -75,12 +112,15 @@ def show_upload():
         else:
             try:
                 cleaned = process_inventory_file(inv_file)
+                CANONICAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
+                cleaned.to_csv(CANONICAL_INVENTORY_FILE, index=False)
                 st.success("✅ Inventory file processed successfully!")
                 st.markdown('<div class="chart-container">', unsafe_allow_html=True)
                 st.dataframe(cleaned.head(10), use_container_width=True)
                 st.markdown('</div>', unsafe_allow_html=True)
                 if run_analytics:
                     st.session_state.analytics_results = run_analytics()
+                    st.session_state.live_data_signature = None
                     st.success("📊 Analytics updated!")
             except Exception as e:
                 st.error(f"❌ Error processing inventory file: {e}")
@@ -126,12 +166,15 @@ def show_upload():
         else:
             try:
                 cleaned = process_sales_file(sales_file)
+                CANONICAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
+                cleaned.to_csv(CANONICAL_SALES_FILE, index=False)
                 st.success("✅ Sales file processed successfully!")
                 st.markdown('<div class="chart-container">', unsafe_allow_html=True)
                 st.dataframe(cleaned.head(10), use_container_width=True)
                 st.markdown('</div>', unsafe_allow_html=True)
                 if run_analytics:
                     st.session_state.analytics_results = run_analytics()
+                    st.session_state.live_data_signature = None
                     st.success("📊 Analytics updated!")
             except Exception as e:
                 st.error(f"❌ Error processing sales file: {e}")

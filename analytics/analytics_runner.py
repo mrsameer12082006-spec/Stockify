@@ -51,23 +51,54 @@ def run_analytics() -> dict:
     """
     
     results = {}
+
+    def _zero_kpis() -> dict:
+        return {
+            "total_products": 0,
+            "total_sales_quantity": 0,
+            "top_selling_product": "",
+            "slow_moving_count": 0,
+        }
+
+    def _pick_latest_available_file(candidates: list[Path]) -> Optional[Path]:
+        existing = [p for p in candidates if p.exists()]
+        if not existing:
+            return None
+        return max(existing, key=lambda p: p.stat().st_mtime_ns)
+
+    def _source_label(file_path: Optional[Path]) -> str:
+        if file_path is None:
+            return "No data"
+        path_str = str(file_path).replace("\\", "/").lower()
+        if "/pos/" in path_str or path_str.endswith("clean_sales.csv") or path_str.endswith("clean_inventory.csv"):
+            return "POS / canonical"
+        if "/ingestion/" in path_str or "/ingestion" in path_str:
+            return "Ingestion"
+        return "Unknown"
     
     try:
-        # Try to load processed data (support both Ingestion/ingestion casing)
-        ingestion_candidates = [
-            project_root / "Ingestion" / "data" / "processed",
-            project_root / "ingestion" / "data" / "processed",
+        # Resolve data files from both POS and ingestion outputs.
+        # We always pick the latest modified available file so uploads and POS
+        # updates are reflected dynamically across all analytics pages.
+        inventory_candidates = [
+            project_root / "data" / "processed" / "clean_inventory.csv",
+            project_root / "Ingestion" / "data" / "processed" / "inventory_cleaned.csv",
+            project_root / "ingestion" / "data" / "processed" / "inventory_cleaned.csv",
         ]
-        ingestion_path = next((p for p in ingestion_candidates if p.exists()), ingestion_candidates[0])
-        
-        inventory_file = ingestion_path / "inventory_cleaned.csv"
-        sales_file = ingestion_path / "sales_cleaned.csv"
+        sales_candidates = [
+            project_root / "data" / "processed" / "clean_sales.csv",
+            project_root / "Ingestion" / "data" / "processed" / "sales_cleaned.csv",
+            project_root / "ingestion" / "data" / "processed" / "sales_cleaned.csv",
+        ]
+
+        inventory_file = _pick_latest_available_file(inventory_candidates)
+        sales_file = _pick_latest_available_file(sales_candidates)
         
         inventory_df = None
         sales_df = None
         
         # Load inventory if available
-        if inventory_file.exists():
+        if inventory_file and inventory_file.exists():
             try:
                 inventory_df = pd.read_csv(inventory_file)
                 results["inventory_df"] = inventory_df
@@ -78,7 +109,7 @@ def run_analytics() -> dict:
             results["inventory_df"] = None
         
         # Load sales if available
-        if sales_file.exists():
+        if sales_file and sales_file.exists():
             try:
                 sales_df = pd.read_csv(sales_file)
                 results["sales_df"] = sales_df
@@ -99,8 +130,12 @@ def run_analytics() -> dict:
                 "daily_trends": pd.DataFrame(),
                 "category_trends": {},
                 "category_time_series": [],
-                "kpis": {},
-                "stock_recommendations": pd.DataFrame()
+                "kpis": _zero_kpis(),
+                "stock_recommendations": pd.DataFrame(),
+                "data_sources": {
+                    "inventory": {"path": str(inventory_file) if inventory_file else "", "label": _source_label(inventory_file)},
+                    "sales": {"path": str(sales_file) if sales_file else "", "label": _source_label(sales_file)},
+                },
             }
         
         # ===== RUN ANALYTICS ON SALES DATA =====
@@ -170,6 +205,11 @@ def run_analytics() -> dict:
         else:
             results["stock_recommendations"] = pd.DataFrame()
         
+        results["data_sources"] = {
+            "inventory": {"path": str(inventory_file) if inventory_file else "", "label": _source_label(inventory_file)},
+            "sales": {"path": str(sales_file) if sales_file else "", "label": _source_label(sales_file)},
+        }
+
         return results
         
     except Exception as e:
@@ -183,6 +223,10 @@ def run_analytics() -> dict:
             "daily_trends": pd.DataFrame(),
             "category_trends": {},
             "category_time_series": [],
-            "kpis": {},
-            "stock_recommendations": pd.DataFrame()
+            "kpis": _zero_kpis(),
+            "stock_recommendations": pd.DataFrame(),
+            "data_sources": {
+                "inventory": {"path": "", "label": "No data"},
+                "sales": {"path": "", "label": "No data"},
+            },
         }

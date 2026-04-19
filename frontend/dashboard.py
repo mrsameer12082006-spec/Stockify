@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from utils.helpers import format_currency
+from utils.data_source_widget import render_data_source_status
 
 def show_dashboard():
     results = st.session_state.get("analytics_results", {})
@@ -11,6 +12,7 @@ def show_dashboard():
         '<div class="page-subtitle">Your complete inventory performance at a glance</div>',
         unsafe_allow_html=True,
     )
+    render_data_source_status(results)
 
     kpis = results.get("kpis", {})
     daily_trends = results.get("daily_trends", pd.DataFrame())

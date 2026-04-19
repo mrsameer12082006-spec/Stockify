@@ -11,8 +11,7 @@ from .database import Database
 class BarcodeAPI:
     """POS barcode API service for lookup, scan, and inventory updates."""
 
-    def __init__(self):
-        self.db = Database()
+    def __init__(self): self.db = Database(); self.pending_sale_by_sku = {}
 
     def lookup(self, code: str) -> Optional[Dict[str, Any]]:
         if not code:
@@ -23,12 +22,50 @@ class BarcodeAPI:
         if not code or quantity <= 0:
             return None
 
+        normalized_code = str(code).strip().upper()
         product = self.lookup(code)
         if not product:
+            created = self.db.add_inventory_product({
+                "sku": normalized_code,
+                "barcode": str(code).strip(),
+                "name": f"New Item {normalized_code}",
+                "category": "Uncategorized",
+                "price": 0.0,
+                "stock": 0,
+                "reorder_point": 0,
+                "supplier_name": "Local Supplier",
+                "supplier_phone": "N/A",
+                "unit_cost": 0.0,
+                "last_purchase_date": "",
+            })
+            if not created:
+                return None
+            product = self.lookup(code)
+            if not product:
+                return None
+
+        sku = str(product.get("sku", "") or "").strip().upper()
+        if not sku:
             return None
 
+        pending_sale = self.pending_sale_by_sku.get(sku, False)
+
+        # First scan of an item: move to inventory (stock +quantity).
+        # Second scan of same item: record sale (stock -quantity and revenue +quantity*price).
+        if not pending_sale:
+            self.db.increment_stock(sku, quantity)
+            updated_product = self.lookup(sku) or product
+            self.pending_sale_by_sku[sku] = True
+            return {
+                "action": "inventory",
+                "message": "Added to inventory. Scan the same item again to record a sale.",
+                "product": updated_product,
+                "quantity": quantity,
+                "updated_stock": updated_product.get("stock"),
+            }
+
         sale_item = {
-            "sku": product["sku"],
+            "sku": sku,
             "name": product["name"],
             "category": product.get("category", ""),
             "price": product.get("price", 0.0),
@@ -36,10 +73,13 @@ class BarcodeAPI:
         }
 
         self.db.record_sale([sale_item])
-        self.db.decrement_stock(product["sku"], quantity)
-        updated_product = self.lookup(product["sku"])
+        self.db.decrement_stock(sku, quantity)
+        updated_product = self.lookup(sku)
+        self.pending_sale_by_sku[sku] = False
 
         return {
+            "action": "sale",
+            "message": "Sale recorded and inventory updated.",
             "product": product,
             "quantity": quantity,
             "updated_stock": updated_product["stock"] if updated_product else None,
@@ -82,7 +122,11 @@ class _BarcodeApiRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/scan":
                 barcode = query.get("barcode", [""])[0]
-                quantity = int(query.get("quantity", ["1"])[0] or 1)
+                quantity_raw = query.get("quantity", ["1"])[0]
+                try:
+                    quantity = int(quantity_raw or 1)
+                except (TypeError, ValueError):
+                    return self._send_json(400, {"error": "Invalid quantity"})
                 result = self.server.api.scan_and_sell(barcode, quantity)
                 if not result:
                     return self._send_json(404, {"error": "Product not found or invalid quantity"})
@@ -134,37 +178,66 @@ class _BarcodeApiRequestHandler(BaseHTTPRequestHandler):
       return '₹' + number.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
+    let scannerRunning = false;
+    let scanInFlight = false;
+    let lastScanText = '';
+    let lastScanTs = 0;
+    const SCAN_COOLDOWN_MS = 1200;
+
     function handleResult(decodedText) {
-      output.textContent = 'Scanned: ' + decodedText + ' — updating inventory...';
-      fetch(`${apiBase}/api/scan?barcode=${encodeURIComponent(decodedText)}&quantity=1`)
+      scanInFlight = true;
+      output.textContent = 'Scanned: ' + decodedText + ' — processing...';
+      return fetch(`${apiBase}/api/scan?barcode=${encodeURIComponent(decodedText)}&quantity=1`)
         .then(response => response.json())
         .then(data => {
           if (data.error) {
             output.textContent = 'Error: ' + data.error;
           } else {
-            output.innerHTML = `Updated inventory for <strong>${data.product.name}</strong>.<br/>New stock: ${data.updated_stock}.<br/>Revenue: ${formatCurrency(data.sale.revenue)}`;
+            const name = (data.product && data.product.name) ? data.product.name : decodedText;
+            const stock = (typeof data.updated_stock === 'number') ? data.updated_stock : 'N/A';
+            const message = data.message || '';
+
+            if (data.action === 'sale' && data.sale) {
+              output.innerHTML = `${message}<br/><strong>${name}</strong><br/>New stock: ${stock}<br/>Revenue: ${formatCurrency(data.sale.revenue)}`;
+            } else {
+              output.innerHTML = `${message}<br/><strong>${name}</strong><br/>Current stock: ${stock}`;
+            }
           }
         })
         .catch(err => {
           output.textContent = 'Network error: ' + err.message;
+        })
+        .finally(() => {
+          scanInFlight = false;
         });
     }
 
     function startScanner() {
       Html5Qrcode.getCameras().then(cameras => {
         if (cameras && cameras.length) {
-          const cameraId = cameras[0].id;
+          const cameraId = cameras[cameras.length - 1].id;
           html5QrcodeScanner.start(
             cameraId,
             { fps: 10, qrbox: 250 },
             decodedText => {
-              html5QrcodeScanner.stop().then(() => handleResult(decodedText));
+              const now = Date.now();
+              if (scanInFlight) {
+                return;
+              }
+              if (decodedText === lastScanText && (now - lastScanTs) < SCAN_COOLDOWN_MS) {
+                return;
+              }
+              lastScanText = decodedText;
+              lastScanTs = now;
+              handleResult(decodedText);
             },
             errorMessage => {
               console.warn(errorMessage);
             }
           ).catch(err => {
             output.textContent = 'Unable to start camera: ' + err;
+          }).then(() => {
+            scannerRunning = true;
           });
         } else {
           output.textContent = 'No camera found on this device.';
@@ -175,8 +248,15 @@ class _BarcodeApiRequestHandler(BaseHTTPRequestHandler):
     }
 
     document.getElementById('stop').addEventListener('click', () => {
+      if (!scannerRunning) {
+        output.textContent = 'Camera is not running.';
+        return;
+      }
       html5QrcodeScanner.stop().then(() => {
+        scannerRunning = false;
         output.textContent = 'Camera stopped.';
+      }).catch(err => {
+        output.textContent = 'Unable to stop camera: ' + err;
       });
     });
 
@@ -237,6 +317,7 @@ class BarcodeApiServer:
 
 
 _API_SERVER: Optional[BarcodeApiServer] = None
+_API_SINGLETON: Optional[BarcodeAPI] = None
 
 
 def get_api_server() -> BarcodeApiServer:
@@ -249,10 +330,17 @@ def get_api_server() -> BarcodeApiServer:
 def start_api_server() -> None:
     server = get_api_server()
     server.start()
+    global _API_SINGLETON
+    if server.server and server.server.api:
+        _API_SINGLETON = server.server.api
 
 
 def get_api() -> BarcodeAPI:
+    global _API_SINGLETON
     server = get_api_server()
     if server.server and server.server.api:
+        _API_SINGLETON = server.server.api
         return server.server.api
-    return BarcodeAPI()
+    if _API_SINGLETON is None:
+        _API_SINGLETON = BarcodeAPI()
+    return _API_SINGLETON
