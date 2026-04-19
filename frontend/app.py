@@ -21,6 +21,7 @@ from visualization.visualizations import show_visualizations
 import sys
 from pathlib import Path
 
+
 # Ensure project root is in path for imports
 project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
@@ -30,6 +31,11 @@ from analytics.analytics_runner import run_analytics
 from pos.pos_page import show_pos_page
 from pos.api import get_api
 from datetime import datetime
+from api.auth_db import create_users_table, create_user, get_user
+from utils.security import hash_password, verify_password
+
+
+create_users_table()
 
 
 def build_demo_analytics_results(industry_focus: str = "Grocery Stores") -> dict:
@@ -198,6 +204,18 @@ LIVE_ANALYTICS_PAGES = {
     "📉 Charts",
 }
 
+QUERY_KEY_TO_PAGE = {
+    "home": "🏠 Home",
+    "upload": "📂 Upload",
+    "pos": "💳 POS",
+    "overview": "📊 Overview",
+    "products": "📦 Products",
+    "trends": "📈 Trends",
+    "insights": "💡 Insights",
+    "alerts": "🚨 Alerts",
+    "charts": "📉 Charts",
+}
+
 
 def _compute_data_signature() -> tuple:
     signature = []
@@ -241,6 +259,13 @@ def _set_query_params(**params) -> None:
                                 st.query_params[key] = str(value)
         except Exception:
                 pass
+
+
+def _requested_page_from_query() -> str | None:
+        page_key = _query_param("page").strip().lower()
+        if not page_key:
+                return None
+        return QUERY_KEY_TO_PAGE.get(page_key)
 
 
 def _render_mobile_scanner_mode() -> None:
@@ -362,6 +387,69 @@ if _query_param("mobile_scanner") == "1":
     set_layout()
     _render_mobile_scanner_mode()
     st.stop()
+
+
+def handle_sign_up(email, password, confirm_password):
+
+    if not email:
+        st.error("Email cannot be empty")
+        return
+
+    if not password:
+        st.error("Password cannot be empty")
+        return
+
+    if password != confirm_password:
+        st.error("Passwords do not match")
+        return
+
+    hashed_password = hash_password(password)
+
+    success = create_user(email, hashed_password)
+
+    if success:
+
+        st.session_state.logged_in = True
+        st.session_state.user_role = "registered"
+        st.session_state.current_page = _requested_page_from_query() or st.session_state.get("current_page", "🏠 Home")
+        st.session_state.auth_requested = False
+        st.session_state.show_how_it_works = False
+
+        st.success("Account created successfully!")
+
+        st.rerun()
+
+    else:
+
+        st.error("Email already exists")
+
+
+def handle_sign_in(email, password):
+
+    user = get_user(email)
+
+    if user is None:
+
+        st.error("User not found")
+        return
+
+    stored_password = user[2]
+
+    if verify_password(password, stored_password):
+
+        st.session_state.logged_in = True
+        st.session_state.user_role = "registered"
+        st.session_state.current_page = _requested_page_from_query() or st.session_state.get("current_page", "🏠 Home")
+        st.session_state.auth_requested = False
+        st.session_state.show_how_it_works = False
+
+        st.success("Login successful!")
+
+        st.rerun()
+
+    else:
+
+        st.error("Incorrect password")
 
 
 # ---------------- LOGIN PAGE (Antigravity-style) ----------------
@@ -567,13 +655,7 @@ def login_page():
                     st.markdown("<div class='forgot-line'>Forgot password?</div>", unsafe_allow_html=True)
 
                     if st.button("🚀 Sign In", use_container_width=True, key="login_signin_btn"):
-                        if username in st.session_state.users and st.session_state.users.get(username) == password:
-                            st.session_state.logged_in = True
-                            st.session_state.auth_requested = False
-                            st.session_state.show_how_it_works = False
-                            st.rerun()
-                        else:
-                            st.error("❌ Invalid credentials. Try admin / admin")
+                        handle_sign_in(username, password)
 
                     st.markdown("<div class='auth-link-row'>Don't have an account? <span class='auth-hint-link'>Sign up</span></div>", unsafe_allow_html=True)
                 else:
@@ -583,22 +665,19 @@ def login_page():
                     _signup_name = st.text_input("Name", placeholder="Name", key="signup_name_input")
                     signup_email = st.text_input("Email", placeholder="example@stockify.com", key="signup_email_input")
                     signup_password = st.text_input("Password", type="password", placeholder="••••••••", key="signup_password_input")
+                    signup_confirm_password = st.text_input("Confirm Password", type="password", placeholder="••••••••", key="signup_confirm_password_input")
 
                     if st.button("Create Account", use_container_width=True, key="login_signup_btn"):
-                        if not signup_email:
-                            st.error("Please enter an email for sign up.")
-                        elif not signup_password:
-                            st.error("Please enter a password for sign up.")
-                        elif signup_email in st.session_state.users:
-                            st.warning("This email is already registered. Please sign in.")
-                        else:
-                            st.session_state.users[signup_email] = signup_password
-                            st.success("✅ Account created! Switch to Sign In to continue.")
+                        handle_sign_up(signup_email, signup_password, signup_confirm_password)
 
                     st.markdown("<div class='auth-link-row'>Already have an account? <span class='auth-hint-link'>Sign in</span></div>", unsafe_allow_html=True)
 
 # ---------------- MAIN APP ----------------
 if not st.session_state.logged_in:
+    requested_page = _requested_page_from_query()
+    if requested_page and requested_page != "🏠 Home":
+        st.session_state.auth_requested = True
+
     if st.session_state.demo_mode_requested:
         selected_focus = st.session_state.get("selected_industry", "Grocery Stores")
         st.session_state.analytics_results = build_demo_analytics_results(selected_focus)

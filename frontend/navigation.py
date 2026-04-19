@@ -1,10 +1,50 @@
 import streamlit as st
 
+
+PAGE_TO_KEY = {
+    "🏠 Home": "home",
+    "📂 Upload": "upload",
+    "💳 POS": "pos",
+    "📊 Overview": "overview",
+    "📦 Products": "products",
+    "📈 Trends": "trends",
+    "💡 Insights": "insights",
+    "🚨 Alerts": "alerts",
+    "📉 Charts": "charts",
+}
+KEY_TO_PAGE = {v: k for k, v in PAGE_TO_KEY.items()}
+
+
+def _get_query_page() -> str | None:
+    try:
+        page_key = st.query_params.get("page", "")
+        if isinstance(page_key, list):
+            page_key = page_key[0] if page_key else ""
+        return KEY_TO_PAGE.get(str(page_key), None)
+    except Exception:
+        return None
+
+
+def _set_query_page(page_label: str) -> None:
+    try:
+        page_key = PAGE_TO_KEY.get(page_label)
+        if page_key:
+            st.query_params["page"] = page_key
+    except Exception:
+        pass
+
+
 def top_navigation():
     """Render an Antigravity-style frosted glass top navigation bar."""
 
+    restored_page = _get_query_page()
+
     if "current_page" not in st.session_state:
-        st.session_state.current_page = "🏠 Home"
+        st.session_state.current_page = restored_page or "🏠 Home"
+    elif restored_page and st.session_state.current_page != restored_page:
+        st.session_state.current_page = restored_page
+
+    _set_query_page(st.session_state.current_page)
 
     pages = [
         ("🏠", "Home"),
@@ -82,6 +122,7 @@ def top_navigation():
             # Use just icon for button label
             if st.button(f"{icon}", key=f"nav_{label}", use_container_width=True, help=label):
                 st.session_state.current_page = full_label
+                _set_query_page(full_label)
                 st.rerun()
 
     # Logout button (red accent, pill style)
@@ -109,6 +150,7 @@ def top_navigation():
             st.session_state.current_page = "🏠 Home"
             st.session_state.auth_requested = False
             st.session_state.show_how_it_works = False
+            _set_query_page("🏠 Home")
             st.rerun()
 
     # Separator
